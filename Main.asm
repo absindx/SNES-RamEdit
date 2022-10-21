@@ -77,7 +77,7 @@ Vectors:
 ;--------------------------------------------------
 
 	org	$C00000
-	db	"Ram edit ver1.00"
+	db	"Ram edit ver1.01"
 
 ;--------------------------------------------------
 ; Program
@@ -91,8 +91,8 @@ UnusedHandler:
 NativeNMI:
 		; NOTE: Do not use PHB : PEA $0000 to save stack usage
 		SEP	#$30
-		BIT	!CPU_RDNMI			;   clear NMI flag
 		PHA
+		LDA.l	!CPU_RDNMI			;   clear NMI flag
 		LDA.l	!AliveCounter			;\
 		INC					; | INC.l !AliveCounter
 		STA.l	!AliveCounter			;/
@@ -129,7 +129,7 @@ EmulationRESET:
 		JML	.SetPBR				;\
 .SetPBR							; |   PB = (PC Bank)
 		PHK					; |   DB = (PC Bank)
-		PLB					; |   D  = #$4300
+		PLB					; |   D  = $4300 (DMA I/O)
 		PEA	!RAM_DMACH0			; |
 		PLD					;/
 		SEP	#$30
@@ -610,7 +610,7 @@ DrawHexNibble:	LDA	LowNibbleAscii, X
 
 DrawEditScreen:
 %DefineLocal(VramAddress,	!ScratchMemory+0, 2)
-%DefineLocal(ColCount,		!ScratchMemory+2, 1)
+%DefineLocal(ColOffset,		!ScratchMemory+2, 1)
 		; .shortm, shortx
 
 		REP	#$20
@@ -619,11 +619,16 @@ DrawEditScreen:
 		LDX.b	#%00000000			;   Increment at $2118, No remap, Increment 1 word
 		STX	!PPU_VMAINC
 
-		LDA.w	#((!VRAM_Layer2Tilemap+$0CE)>>1)	;   VRAM address: "BANK"
+		LDA.w	#((!VRAM_Layer2Tilemap+$0CE)>>1);   VRAM address: "BANK"
 		STA	!PPU_VMADDL
 
-		LDA.w	#((!VRAM_Layer2Tilemap+$1C4)>>1)	;   draw address
+		LDA.w	#((!VRAM_Layer2Tilemap+$1C4)>>1);   draw address
 		STA.b	.VramAddress
+
+		LDA.b	!EditBaseAddress		;\
+		STA	!WRAM_WMADDL			; | WRAM address = !EditBaseAddress (& $01FFFF)
+		LDX.b	!EditBaseAddress+2		; |
+		STX	!WRAM_WMADDH			;/
 
 		SEP	#$30
 		; .shortm, shortx
@@ -636,53 +641,55 @@ DrawEditScreen:
 		LDA.b	.VramAddress+1			; |
 		STA	!PPU_VMADDH			;/
 
-		LDY.b	#$00
+		STZ.b	.ColOffset
+
+		dpbase	$2100
+		PEA	$2100				;\  DP = $2100 (PPU I/O)
+		PLD					;/
+		LDA	#$00
+
 		CLC
-
-.LoopRow	LDX.b	#$08
-		STX.b	.ColCount
-		LDA.b	EditBaseAddress+1		;\
-		;JSR	DrawHex				; | draw address
+.LoopRow	LDX	!EditBaseAddress+1		;\
+		LDY	HighNibbleAscii, X		; | draw address - high
+		STY.b	!PPU_VMDATAL			; |   DrawHex routine (inline)
+		LDY	LowNibbleAscii, X		; |
+		STY.b	!PPU_VMDATAL			;/
+		;CLC					;\
+		ADC	!EditBaseAddress+0		; | draw address - low
 		TAX					; |   DrawHex routine (inline)
 		LDA	HighNibbleAscii, X		; |
-		STA	!PPU_VMDATAL			; |
+		STA.b	!PPU_VMDATAL			; |
 		LDA	LowNibbleAscii, X		; |
-		STA	!PPU_VMDATAL			; |
-		TYA					; |
-		;CLC					; |
-		ADC	EditBaseAddress+0		; |
-		TAX					; |   DrawHex routine (inline)
-		LDA	HighNibbleAscii, X		; |
-		STA	!PPU_VMDATAL			; |
+		STA.b	!PPU_VMDATAL			;/
+		BIT.b	!PPU_VMDATALREAD		;   dummy read (increment VRAM address)
+
+		LDY.b	#$08
+.LoopCol	LDX.b	!WRAM_WMDATA			;\
+		LDA	HighNibbleAscii, X		; | draw memory value
+		STA.b	!PPU_VMDATAL			; |   DrawHex routine (inline)
 		LDA	LowNibbleAscii, X		; |
-		STA	!PPU_VMDATAL			;/
-
-		LDA	!PPU_VMDATALREAD		;   dummy read (increment VRAM address)
-
-.LoopCol	LDA.b	[!EditBaseAddress], Y		;\
-		INY					; | draw memory value
-		;JSR	DrawHex				;/
-		TAX					;\
-		LDA	HighNibbleAscii, X		; | DrawHex routine (inline)
-		STA	!PPU_VMDATAL			; |
-		LDA	LowNibbleAscii, X		; |
-		STA	!PPU_VMDATAL			;/
-
-		LDA	!PPU_VMDATALREAD		;   dummy read (increment VRAM address)
-		DEC.b	.ColCount
+		STA.b	!PPU_VMDATAL			;/
+		BIT.b	!PPU_VMDATALREAD		;   dummy read (increment VRAM address)
+		DEY
 		BNE	.LoopCol
 
 		REP	#$21				;   carry is 0
 		; .longm, shortx
-		CLC					;\
-		LDA.b	.VramAddress+0			; |
+		LDA	.VramAddress+0			;\
 		ADC.w	#$0040				; | next row VRAM address
-		STA.b	.VramAddress+0			; |
-		STA	!PPU_VMADDL			; |
-		SEP	#$30				;/
+		STA	.VramAddress+0			; |
+		STA.b	!PPU_VMADDL			; |
+		SEP	#$31				;/
 		; .shortm, shortx
-		CPY	#$40
+		LDA	.ColOffset
+		ADC.b	#$07				;   +8
+		STA	.ColOffset
+		CMP.b	#$40
 		BCC	.LoopRow
+
+		dpbase	!RAM_DMACH0
+		PEA	!RAM_DMACH0			;\  DP = $4300 (DMA I/O)
+		PLD					;/
 
 		; Redraw cursor
 		JSR	ScreenRoutine_Edit_SetCursorAddress
@@ -1465,11 +1472,6 @@ ScreenRoutine_MenuMessage:
 		BIT.b	#!Button_Start			; | Start: OK
 		BNE	-				;/
 		RTS
-
-;--------------------------------------------------
-; Signature
-;--------------------------------------------------
-	db	'h', 'k'-'h', 's'-'k', 'y'-'s'
 
 ;--------------------------------------------------
 ; User preset data
