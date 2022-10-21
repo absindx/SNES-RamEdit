@@ -21,12 +21,10 @@ pushpc
 !RAM_DMACH7	= !DMA_DMAP7
 
 %DefineRam(ScratchMemory,	!RAM_DMACH1, 11)
-%DefineRam(StackUserExec,	!RAM_DMACH6, 11)
 %DefineRam(Stack,		!RAM_DMACH7, 11)
 !StackLength	= 10					; MEMO : Mesen-S cannot use $43xB unknown registers as stack (general purpose) memory.
 							;        Works even at +11 on real machines and bsnes.
 !Stack_Bottom		= !Stack+!StackLength
-!StackUserExec_Bottom	= !StackUserExec+!StackLength
 
 ;--------------------------------------------------
 

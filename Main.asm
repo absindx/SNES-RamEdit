@@ -602,10 +602,8 @@ DrawHex:
 		TAX
 		LDA	HighNibbleAscii, X
 		STA	!PPU_VMDATAL
-		;STZ	!PPU_VMDATAH
-DrawHexNibble:	LDA	LowNibbleAscii, X
+		LDA	LowNibbleAscii, X
 		STA	!PPU_VMDATAL
-		;STZ	!PPU_VMDATAH
 		RTS
 
 DrawEditScreen:
@@ -1427,7 +1425,7 @@ RunCode_Halted:
 		; .shortm, shortx
 
 		LDA.b	#!TilemapID_MenuMessage_Halted
-		;JMP	RunCode_RestoreStatus
+		;BRA	RunCode_RestoreStatus		;   fall through
 
 RunCode_RestoreStatus:
 		REP	#$DB				;   nvMxdIzc
