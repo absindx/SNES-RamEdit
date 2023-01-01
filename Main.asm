@@ -3,16 +3,45 @@
 ;--------------------------------------------------
 
 ;--------------------------------------------------
+; General setting
+;--------------------------------------------------
+
+!RomSize	= 512*1024
+!RomType	= 1					; 0=LoROM / 1=HiROM
+;!DEBUG		= 1					; Release build with comment out
+
+;--------------------------------------------------
 ; ROM setting
 ;--------------------------------------------------
 
-hirom
-arch 65816
+	arch	65816
 
-math round on
-math pri on
+	math	round on
+	math	pri on
 
-;!DEBUG	= 1
+	print	"ROM Size: ", dec(!RomSize/1024), "KiB"
+if !RomType == 0
+	print	"ROM Type: LoROM"
+	lorom
+	!LoROM	= 1
+	!HiROM	= 0
+
+	!EofAddress	= !RomSize*2+$808000
+	org	$808000
+else
+	print	"ROM Type: HiROM"
+	hirom
+	!LoROM	= 0
+	!HiROM	= 1
+
+	!EofAddress	= !RomSize+$C00000
+	org	$C00000
+endif
+
+	check bankcross off
+	padbyte	$00
+	pad	!EofAddress
+	check bankcross on
 
 ;--------------------------------------------------
 ; Library
@@ -43,13 +72,13 @@ AdditionalCartridgeInformation:
 CartridgeInformation:
 	db	"Ram edit"				; $00FFC0 : Game title
 	pad	$00FFD5
-	db	$20					; $00FFD5 : Map mode (Slow 2.68 MHz)
+	db	$20|!RomType				; $00FFD5 : Map mode (Slow 2.68 MHz)
 	db	$00					; $00FFD6 : Cartridge type (ROM)
-	db	$09					; $00FFD7 : Rom size (4M Bit)
+	db	log2(!RomSize/1024)			; $00FFD7 : Rom size (4M Bit)
 	db	$00					; $00FFD8 : Ram size (None)
 	db	$00					; $00FFD9 : Destination code (Japan)
 	db	$33					; $00FFDA : Fixed value
-	db	$00					; $00FFDB : Mask rom version
+	db	$01					; $00FFDB : Mask rom version
 	dw	$FFFF					; $00FFDC : Complement check
 	dw	$0000					; $00FFDE : Check sum
 
@@ -73,14 +102,7 @@ Vectors:
 	dw	UnusedHandler				; $00FFFE : Emulation IRQ / BRK
 
 ;--------------------------------------------------
-; ROM signature
-;--------------------------------------------------
-
-	org	$C00000
-	db	"Ram edit ver1.01"
-
-;--------------------------------------------------
-; Program
+; Interrupt handler
 ;--------------------------------------------------
 
 	org	$00FFAF
@@ -107,10 +129,34 @@ NativeCOP:
 	warnpc	UnusedHandler
 
 ;--------------------------------------------------
+; ROM signature
+;--------------------------------------------------
+
+if !LoROM
+	org	$008000
+else
+	org	$C00000
+endif
+
+	;	 0123456789ABCDEF
+	db	"Ram edit ver1.10"
+if !LoROM
+	db	"LoROM           "
+else
+	db	"HiROM           "
+endif
+
+if !HiROM
+	org	$008000	; HiROM
+endif
+
+;--------------------------------------------------
+; Program
+;--------------------------------------------------
 
 	fillbyte	$00
 	padbyte		$00
-	org	$008000
+
 EmulationRESET:
 		SEI					;   for emulator vector detection
 		REP	#$CB				;   nv??dIzc
@@ -725,7 +771,7 @@ GotoScreen_Edit:
 		LDA.b	#!TilemapID_EditUsage
 		JSR	TransferTilemap
 		JSR	DrawEditScreen
-		LDA.b	#%00000010			; hide layer 1 (menu)
+		LDA.b	#%00000010			;   hide layer 1 (menu)
 		STA	!PPU_TM
 		RTS
 
@@ -744,7 +790,7 @@ GotoScreen_Jump:
 		STA	!ScreenMode
 		LDA.b	#!TilemapID_Jump
 		JSR	TransferTilemap
-		LDA.b	#%00000010			; hide layer 1 (menu)
+		LDA.b	#%00000010			;   hide layer 1 (menu)
 		STA	!PPU_TM
 		RTS
 
@@ -789,7 +835,7 @@ GotoScreen_Menu:
 		JSR	TransferTilemap
 		LDA.b	#!TilemapID_MenuMessage_Blank
 		JSR	TransferTilemap
-		LDA.b	#%00000011			; show layer 1 (menu)
+		LDA.b	#%00000011			;   show layer 1 (menu)
 		STA	!PPU_TM
 		RTS
 
@@ -800,7 +846,7 @@ GotoScreen_RunCode:
 		STA	!ScreenMode
 		LDA.b	#!TilemapID_MenuMessage_Running
 		JSR	TransferTilemap
-		LDA.b	#%00000011			; show layer 1 (menu)
+		LDA.b	#%00000011			;   show layer 1 (menu)
 		STA	!PPU_TM
 		RTS
 
@@ -811,7 +857,7 @@ GotoScreen_MenuMessage:
 		STA	!ScreenMode
 		LDA.b	#!TilemapID_MenuMessageUsage
 		JSR	TransferTilemap
-		LDA.b	#%00000011			; show layer 1 (menu)
+		LDA.b	#%00000011			;   show layer 1 (menu)
 		STA	!PPU_TM
 		RTS
 
@@ -1352,6 +1398,37 @@ ScreenRoutine_MenuItem_PresetWrite:
 		LDA.w	#(%00000000)|(!WRAM_WMDATA<<8)	;\  DMA parameter = Bus: A to B / Address: Increment A / Transfer: 1 byte, 1 address
 							; | B-Bus address = !WRAM_WMDATA
 		STA	!DMA_DMAP0			;/    with !DMA_BBAD0
+
+if !LoROM
+		LDA.w	#$8000				;\
+		STX	!DMA_A1B0			; | A-Bus address = PresetMemoryX
+		STA	!DMA_A1T0L			;/
+		STA	!DMA_DAS0L			;   DMA size = $8000
+		LDY.b	#$01				;\  Execute DMA #0 (1)
+		STY	!CPU_MDMAEN			;/
+
+		INX					;\
+		STX	!DMA_A1B0			; | A-Bus address = PresetMemoryX + $08000
+		STA	!DMA_A1T0L			;/
+		STA	!DMA_DAS0L			;   DMA size = $8000
+		;LDY.b	#$01				;\  Execute DMA #0 (2)
+		STY	!CPU_MDMAEN			;/
+
+		INX					;\
+		STX	!DMA_A1B0			; | A-Bus address = PresetMemoryX + $10000
+		STA	!DMA_A1T0L			;/
+		STA	!DMA_DAS0L			;   DMA size = $8000
+		;LDY.b	#$01				;\  Execute DMA #0 (3)
+		STY	!CPU_MDMAEN			;/
+
+		INX					;\
+		STX	!DMA_A1B0			; | A-Bus address = PresetMemoryX + $18000
+		STA	!DMA_A1T0L			;/
+		STA	!DMA_DAS0L			;   DMA size = $8000
+		;LDY.b	#$01				;\  Execute DMA #0 (4)
+		STY	!CPU_MDMAEN			;/
+
+else
 		STZ	!DMA_A1T0L			;\  A-Bus address = PresetMemoryX
 		STX	!DMA_A1B0			;/
 		STZ	!DMA_DAS0L			;   DMA size = $10000
@@ -1360,11 +1437,9 @@ ScreenRoutine_MenuItem_PresetWrite:
 
 		INX					;\  A-Bus address = PresetMemoryX + $10000
 		STX	!DMA_A1B0			;/
-		LDY	#$7F				;\
-		STY	!WRAM_WMADDH			; | PPU WRAM access addr = $7F0000
-		STZ	!WRAM_WMADDL			;/
 		LDY.b	#$01				;\  Execute DMA #0
 		STY	!CPU_MDMAEN			;/
+endif
 
 		SEP	#$30
 
@@ -1411,7 +1486,7 @@ ScreenRoutine_RunCode:
 		; .shortm, shortx
 
 		; None
-+		RTS
+		RTS
 
 RunCode_Return:
 		SEP	#$34				;   ??MX?I??
@@ -1478,13 +1553,43 @@ ScreenRoutine_MenuMessage:
 	check bankcross	off
 	dpbase		$0000
 
--	org		$C00000+(-)					;\  to hirom address
+macro FillPreset(fillValue)
+	if !Debug
+		print "Preset: $", pc
+	endif
+
+	fillbyte	<fillValue>
+	fill		$8000
+	fill		$8000
+	fill		$8000
+	fill		$8000
+endmacro
+macro BinPreset(file)
+	if !Debug
+		print "Preset: $", pc
+	endif
+
+	incbin		<file>:000000-008000
+	incbin		<file>:008000-010000
+	incbin		<file>:010000-018000
+	incbin		<file>:018000-020000
+endmacro
+
+if !LoROM
+-	org		$800000+(-)			;\  to hirom address
+	skip align	$040000
+else
+-	org		$C00000+(-)			;\  to hirom address
 	skip align	$20000				;/  $C00000 + ceilBank(pc)
+endif
+
 incsrc	"PresetMemory.asm"
 
 ;--------------------------------------------------
 
-	fillbyte	$00
-	fill align	$080000
+	print	"Code end: $", pc
+	warnpc	!EofAddress
+
+	print	"EOF Addr: $", hex(!EofAddress)
 
 

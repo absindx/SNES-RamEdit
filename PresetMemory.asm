@@ -7,4 +7,4 @@ PresetMemory2:
 	incsrc	"PresetMemory/Template.asm"
 
 PresetMemory3:
-	incbin	"PresetMemory/Template.bin"
+	%BinPreset("PresetMemory/Template.bin")
