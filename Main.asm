@@ -139,7 +139,7 @@ else
 endif
 
 	;	 0123456789ABCDEF
-	db	"Ram edit ver1.10"
+	db	"Ram edit ver1.11"
 if !LoROM
 	db	"LoROM           "
 else
@@ -771,6 +771,7 @@ GotoScreen_Edit:
 		LDA.b	#!TilemapID_EditUsage
 		JSR	TransferTilemap
 		JSR	DrawEditScreen
+		JSR	ScreenRoutine_Edit_DrawCopy
 		LDA.b	#%00000010			;   hide layer 1 (menu)
 		STA	!PPU_TM
 		RTS
@@ -1044,12 +1045,15 @@ ScreenRoutine_Edit_Copy:
 		LSR
 		LSR
 
-.Write		STA.b	!EditCopyValue
+.Write
+		STA.b	!EditCopyValue
+ScreenRoutine_Edit_DrawCopy:
+		; .shortm, shortx
 		LDX.b	#(!EditScreen_VramAddressCopyValue>>1)
 		STX	!PPU_VMADDL
 		LDX.b	#(!EditScreen_VramAddressCopyValue>>9)
 		STX	!PPU_VMADDH
-		TAX
+		LDX.b	!EditCopyValue
 		LDA	AsciiHex, X
 		STA	!PPU_VMDATAL
 		RTS
@@ -1576,8 +1580,8 @@ macro BinPreset(file)
 endmacro
 
 if !LoROM
--	org		$800000+(-)			;\  to hirom address
-	skip align	$040000
+-	org		$800000+(-)			;\  to lorom address
+	skip align	$040000				;/  $800000 + ceilBank(pc)
 else
 -	org		$C00000+(-)			;\  to hirom address
 	skip align	$20000				;/  $C00000 + ceilBank(pc)
